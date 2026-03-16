@@ -7,7 +7,7 @@ COL_TYPES = {
     }
 
 DATE_COLS = {
-    "creation_data": "%Y-%m-%d",
+    "creation_date": "%Y-%m-%d",
     "disposition_date" :"%Y-%m-%d"
     }
 

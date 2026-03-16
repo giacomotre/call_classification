@@ -3,17 +3,17 @@ from pathlib import Path
 from config import COL_TYPES, DATE_COLS
 
 ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = ROOT / "data"
+DATA_DIR = ROOT / "data" / "raw"
 
 # --- Loading the csv and selecting columns ---
 def csv_loader(filename):
     path = DATA_DIR /filename
     try:
-        df_raw = pd.read_csv(path)
-        df_raw = df_raw[["Case Number", "Subject", "Creation Data", "Disposition Date", "Field Remarks"]]
+        df_raw = pd.read_csv(path, encoding="latin1")
+        df_raw = df_raw[["Case Number", "Subject", "Creation Date", "Disposition Date", "Field Remarks"]]
 
         df_raw = df_raw.rename(columns={"Case Number" : "case_number", "Subject" : "subject",
-                                    "Creation Data": "creation_data", "Disposition Date": "disposition_date",
+                                    "Creation Date": "creation_date", "Disposition Date": "disposition_date",
                                     "Field Remarks": "field_remarks"})
         return df_raw
 
