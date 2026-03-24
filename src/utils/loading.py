@@ -1,22 +1,18 @@
 import pandas as pd
 from pathlib import Path
-from config import COL_TYPES, DATE_COLS
+from config import COL_TYPES, DATE_COLS, KEEP_COLS, RENAME_COLS
 
 ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = ROOT / "data" / "raw"
 
 # --- Loading the csv and selecting columns ---
 def csv_loader(filename):
-    path = DATA_DIR /filename
+    path = DATA_DIR / filename
     try:
-        df_raw = pd.read_csv(path, encoding="latin1")
-        df_raw = df_raw[["Case Number", "Subject", "Creation Date", "Disposition Date", "Field Remarks"]]
-
-        df_raw = df_raw.rename(columns={"Case Number" : "case_number", "Subject" : "subject",
-                                    "Creation Date": "creation_date", "Disposition Date": "disposition_date",
-                                    "Field Remarks": "field_remarks"})
+        df_raw = pd.read_csv(path, encoding="latin1", na_values=["-"])
+        df_raw = df_raw[KEEP_COLS]
+        df_raw = df_raw.rename(columns=RENAME_COLS)
         return df_raw
-
     except FileNotFoundError:
         print(f"No file found in {path}")
 

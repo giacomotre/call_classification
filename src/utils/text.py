@@ -18,11 +18,15 @@ def text_section_parser(remark_field_string):
         "problem_description_text": "", "problem_description_date": "",
         "resolution_text": "", "resolution_date": "",
         "internal_comments_text": "", "internal_comments_date": "",
+        "internal_remarks_text": "", "internal_remarks_date": "",
+        "external_remarks_text": "", "external_remarks_date": "",
         "parent_diagnostic_text": "", "parent_diagnostic_date": "",
         "parent_follow_up_text": "", "parent_follow_up_date": "",
         "parent_problem_description_text": "", "parent_problem_description_date": "",
         "parent_resolution_text": "", "parent_resolution_date": "",
-        "parent_internal_comments_text": "", "parent_internal_comments_date": ""
+        "parent_internal_comments_text": "", "parent_internal_comments_date": "",
+        "parent_internal_remarks_text": "", "parent_internal_remarks_date": "",
+        "parent_external_remarks_text": "", "parent_external_remarks_date": "",
     }
         
     for pattern_prefix, key_prefix in [("", ""), (PARENT_PREFIX, "parent_")]:
@@ -50,6 +54,11 @@ def text_section_parser(remark_field_string):
                 column_dictionary[text_key] = chunk[0][1].strip()
                 
     return column_dictionary
+
+def count_resolutions(resolution_text):
+    if not resolution_text:
+        return None
+    return resolution_text.count(SEPARATOR) + 1
 
 if __name__ == "__main__":
     test_text = test_text = """*** Diagnostic performed by Engineer [2025-11-17 20:08:23]
