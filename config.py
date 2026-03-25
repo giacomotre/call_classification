@@ -1,6 +1,6 @@
-# --- Data type raw file --- 
+# --- LOADING --- 
 
-# --- Column renaming ---
+# Column renaming 
 RENAME_COLS = {
     "Case Number":         "case_number",
     "Case Prio":           "case_priority",
@@ -14,6 +14,8 @@ RENAME_COLS = {
     "IB Service Team":     "ib_service_team",
     "Remote Remarks":      "remote_remarks",
     "Field Remarks":       "field_remarks",
+    "Remote Remarks_EN":  "remote_remarks_en",
+    "Field Remarks_EN":   "field_remarks_en",
     "Equipment":           "equipment",
     "System Code":         "system_code",
     "Parts Consumed List": "parts_consumed_list",
@@ -26,7 +28,7 @@ RENAME_COLS = {
     "TTSU Bucket":         "ttsu_bucket"
 }
 
-# --- Data types ---
+# Data types 
 COL_TYPES = {
     "case_number":          "Int64",
     "case_priority":        "Int64",
@@ -47,21 +49,29 @@ COL_TYPES = {
     "ttsu_bucket":          "string"
 }
 
-# --- Date columns ---
+# Date columns
 DATE_COLS = {
     "creation_date":    "%Y-%m-%d",
     "disposition_date": "%Y-%m-%d",
     "teco_date":        "%Y-%m-%d"
 }
 
-# --- Columns to load
+# --- Columns with comma decimal separator ---
+COMMA_DECIMAL_COLS = [
+    "Remote Hours", "Travel Hours", "Onsite Hours",
+    "Offsite Hours", "Total Hours"
+]
+
+# Columns to load
 KEEP_COLS = [
     "Case Number", "Case Prio", "Case Type",
     "Subject",
     'Creation Date', 'Disposition Date', 'TECO Date',
     "Market", "Country", "IB Service Team",
-    "Remote Remarks",
-    "Field Remarks",
+    "Remote Remarks",        # keep original for reference
+    "Field Remarks",         # keep original for reference
+    "Remote Remarks_EN",     # translated version
+    "Field Remarks_EN",      # translated version
     "Equipment", "System Code", 
     'Parts Consumed List',
     'Remote Hours',
@@ -69,32 +79,91 @@ KEEP_COLS = [
     'TTSU Days', 'TTSU Bucket'
 ]
 
-# --- List on field_remarks section ---
+# --- TEXT EXTRACTION ---
+
+SEPARATOR = " [SEP] "
+
+PARENT_PREFIX = "Parent "
 
 FIELD_REMARKS_SECTIONS = [
+    # Family A — standard
     "Diagnostic performed by Engineer",
     "Follow Up Required",
     "Problem Description by Engineer",
     "Resolution",
     "Internal Comments",
     "Internal Remarks",
-    "External Remarks"]
+    "External Remarks",
+    # Family B — T2/OneEMS
+    "T2 Activities",
+    "OneEMS internal remarks",
+    # Occasional
+    "PFQ: Malfunction",
+]
 
 SECTION_COLUMN_MAP = {
-    "Diagnostic performed by Engineer": "diagnostic",
-    "Follow Up Required": "follow_up",
-    "Problem Description by Engineer": "problem_description",
-    "Resolution": "resolution",
-    "Internal Comments": "internal_comments", 
-    "Internal Remarks": "internal_remarks",
-    "External Remarks": "external_remarks"
+    "Diagnostic performed by Engineer":  "diagnostic",
+    "Follow Up Required":                "follow_up",
+    "Problem Description by Engineer":   "problem_description",
+    "Resolution":                        "resolution",
+    "Internal Comments":                 "internal_comments",
+    "Internal Remarks":                  "internal_remarks",
+    "External Remarks":                  "external_remarks",
+    "T2 Activities":                     "t2_activities",
+    "OneEMS internal remarks":           "onems_internal",
+    "PFQ: Malfunction":                  "pfq_malfunction",
 }
 
-SEPARATOR = " [SEP] "
+# --- Sub-field extraction patterns (Layer 2) ---
 
-PARENT_PREFIX = "Parent "
+PROBLEM_SUBFIELD_PATTERNS = [
+    "Problem description by engineer :",
+    "Problem Description:",
+]
 
-# --- Metadata Feature labels ---
+ERROR_SUBFIELD_PATTERNS = [
+    "Error # and/or description of error :",
+    "Error # and/or description of error:",
+]
+
+MALFUNCTION_SUBFIELD_PATTERNS = [
+    "Malfunction area :",
+    "Malfunction area:"
+]
+
+TROUBLESHOOTING_SUBFIELD_PATTERNS = [
+    "Troubleshooting Action:",
+]
+
+REPAIR_ACTION_SUBFIELD_PATTERNS = [
+    "Repair Action:",
+    "Repair Action :",
+    'Repair Action "Internal" :',
+    'Repair Action "External" :',
+]
+
+BOILERPLATE_STRIP = [
+    "Information to support the complaint handling process",
+    "Customer Function/Role:",
+    "How was the device being used?",
+    "Expected and actual behavior of the product:",
+    "User Impact:",
+    "Patient Impact:",
+    "Current Software Version:",
+]
+
+# --- Layer 2 output column names ---
+
+EXTRACTED_COLUMNS = [
+    "extracted_problem_description",
+    "extracted_error",
+    "extracted_malfunction_area",
+    "extracted_troubleshooting",
+    "extracted_repair_action",
+]
+
+
+# --- METADATA FEATURES ---
 
 RESOLUTION_PATH_LABELS = {
     "remote": "remote_only",

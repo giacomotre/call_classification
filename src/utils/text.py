@@ -1,32 +1,40 @@
 import re
 import sys
+import pandas as pd
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from pathlib import Path
-from config import FIELD_REMARKS_SECTIONS, SEPARATOR, PARENT_PREFIX, SECTION_COLUMN_MAP
-
-
+from config import (FIELD_REMARKS_SECTIONS, SEPARATOR, PARENT_PREFIX, 
+                    SECTION_COLUMN_MAP, PROBLEM_SUBFIELD_PATTERNS,
+                    ERROR_SUBFIELD_PATTERNS, MALFUNCTION_SUBFIELD_PATTERNS,
+                    TROUBLESHOOTING_SUBFIELD_PATTERNS, REPAIR_ACTION_SUBFIELD_PATTERNS,
+                    EXTRACTED_COLUMNS, BOILERPLATE_STRIP)
 
 
 def text_section_parser(remark_field_string):
     
     column_dictionary = {
-        "diagnostic_text": "", "diagnostic_date": "",
-        "follow_up_text": "", "follow_up_date": "",
-        "problem_description_text": "", "problem_description_date": "",
-        "resolution_text": "", "resolution_date": "",
-        "internal_comments_text": "", "internal_comments_date": "",
-        "internal_remarks_text": "", "internal_remarks_date": "",
-        "external_remarks_text": "", "external_remarks_date": "",
-        "parent_diagnostic_text": "", "parent_diagnostic_date": "",
-        "parent_follow_up_text": "", "parent_follow_up_date": "",
-        "parent_problem_description_text": "", "parent_problem_description_date": "",
-        "parent_resolution_text": "", "parent_resolution_date": "",
-        "parent_internal_comments_text": "", "parent_internal_comments_date": "",
-        "parent_internal_remarks_text": "", "parent_internal_remarks_date": "",
-        "parent_external_remarks_text": "", "parent_external_remarks_date": "",
+        "diagnostic_text": None, "diagnostic_date": None,
+        "follow_up_text": None, "follow_up_date": None,
+        "problem_description_text": None, "problem_description_date": None,
+        "resolution_text": None, "resolution_date": None,
+        "internal_comments_text": None, "internal_comments_date": None,
+        "internal_remarks_text": None, "internal_remarks_date": None,
+        "external_remarks_text": None, "external_remarks_date": None,
+        "parent_diagnostic_text": None, "parent_diagnostic_date": None,
+        "parent_follow_up_text": None, "parent_follow_up_date": None,
+        "parent_problem_description_text": None, "parent_problem_description_date": None,
+        "parent_resolution_text": None, "parent_resolution_date": None,
+        "parent_internal_comments_text": None, "parent_internal_comments_date": None,
+        "parent_internal_remarks_text": None, "parent_internal_remarks_date": None,
+        "parent_external_remarks_text": None, "parent_external_remarks_date": None,
+        "t2_activities_text": None, "t2_activities_date": None,
+        "onems_internal_text": None, "onems_internal_date": None,
+        "pfq_malfunction_text": None, "pfq_malfunction_date": None,
+        "parent_t2_activities_text": None, "parent_t2_activities_date": None,
+        "parent_onems_internal_text": None, "parent_onems_internal_date": None,
+        "parent_pfq_malfunction_text": None, "parent_pfq_malfunction_date": None,
     }
         
     for pattern_prefix, key_prefix in [("", ""), (PARENT_PREFIX, "parent_")]:
@@ -56,17 +64,88 @@ def text_section_parser(remark_field_string):
     return column_dictionary
 
 def count_resolutions(resolution_text):
-    if not resolution_text:
+    if pd.isna(resolution_text):
         return None
     return resolution_text.count(SEPARATOR) + 1
 
-if __name__ == "__main__":
-    test_text = test_text = """*** Diagnostic performed by Engineer [2025-11-17 20:08:23]
-    Mantenimiento Correctivo
-    *** Resolution [2026-01-02 11:57:06]
-    Se realiza cambio de parte.
-    *** Parent Resolution [2025-12-31 15:26:22]
-    Parent resolution text here."""
+def strip_boilerplate(text):
+    for phrase in BOILERPLATE_STRIP:
+        idx = text.find(phrase)
+        if idx != -1:
+            text = text[:idx]
+    return text.strip()
 
-    result = text_section_parser(test_text)
+
+def extract_subfield(text, patterns):
+    if pd.isna(text) or not isinstance(text, str) or not text.strip():
+        return None
+    for pattern in patterns:
+        regex = rf"{re.escape(pattern)}(.*?)(?=\n\S.{{0,60}}:|$)"
+        match = re.search(regex, text, re.DOTALL)
+        if match:
+            extracted = match.group(1).strip()
+            extracted = strip_boilerplate(extracted)
+            return extracted if extracted else None
+    return None
+
+def extract_all_subfields(row, suffix=""):
+    result = {col: None for col in EXTRACTED_COLUMNS}
+
+    result["extracted_problem_description"] = (
+        extract_subfield(row.get(f"problem_description_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"t2_activities_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"onems_internal_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
+        row.get(f"problem_description_text{suffix}") or
+        row.get(f"diagnostic_text{suffix}") or
+        None
+    )
+
+    result["extracted_error"] = (
+        extract_subfield(row.get(f"problem_description_text{suffix}"), ERROR_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"internal_comments_text{suffix}"), ERROR_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"follow_up_text{suffix}"), ERROR_SUBFIELD_PATTERNS) or
+        None
+    )
+
+    result["extracted_malfunction_area"] = (
+        extract_subfield(row.get(f"problem_description_text{suffix}"), MALFUNCTION_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"t2_activities_text{suffix}"), MALFUNCTION_SUBFIELD_PATTERNS) or
+        None
+    )
+
+    result["extracted_troubleshooting"] = (
+        extract_subfield(row.get(f"t2_activities_text{suffix}"), TROUBLESHOOTING_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"external_remarks_text{suffix}"), TROUBLESHOOTING_SUBFIELD_PATTERNS) or
+        None
+    )
+
+    result["extracted_repair_action"] = (
+        extract_subfield(row.get(f"t2_activities_text{suffix}"), REPAIR_ACTION_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"external_remarks_text{suffix}"), REPAIR_ACTION_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"internal_comments_text{suffix}"), REPAIR_ACTION_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"problem_description_text{suffix}"), REPAIR_ACTION_SUBFIELD_PATTERNS) or
+        extract_subfield(row.get(f"onems_internal_text{suffix}"), REPAIR_ACTION_SUBFIELD_PATTERNS) or
+        row.get(f"resolution_text{suffix}") or
+        None
+    )
+
+    return result
+
+if __name__ == "__main__":
+    test_text = """*** Problem Description by Engineer [2025-11-17 20:08:23]
+Problem description by engineer :
+Noise in patient table
+Malfunction area :
+Patient Support
+*** Resolution [2026-01-02 11:57:06]
+Engineer replaced the gradient board."""
+
+    parsed = text_section_parser(test_text)
+    print("--- Section parser ---")
+    print(parsed)
+    
+    print("\n--- Sub-field extractor ---")
+    import pandas as pd
+    row = pd.Series(parsed)
+    result = extract_all_subfields(row)
     print(result)

@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from config import COL_TYPES, DATE_COLS, KEEP_COLS, RENAME_COLS
+from config import COL_TYPES, DATE_COLS, KEEP_COLS, RENAME_COLS, COMMA_DECIMAL_COLS
 
 ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = ROOT / "data" / "raw"
@@ -9,7 +9,16 @@ DATA_DIR = ROOT / "data" / "raw"
 def csv_loader(filename):
     path = DATA_DIR / filename
     try:
-        df_raw = pd.read_csv(path, encoding="latin1", na_values=["-"])
+        df_raw = pd.read_csv(path, encoding="latin1", na_values=["-", "#VALUE!"])
+
+        for col in COMMA_DECIMAL_COLS:
+            df_raw[col] = (
+                df_raw[col]
+                .astype(str)
+                .str.replace(",", ".", regex=False)
+                .str.strip()
+                .replace("nan", pd.NA)
+            )
         df_raw = df_raw[KEEP_COLS]
         df_raw = df_raw.rename(columns=RENAME_COLS)
         return df_raw
@@ -25,4 +34,3 @@ def cast_column_type(df, col_types=COL_TYPES, date_cols=DATE_COLS):
           df[col] = pd.to_datetime(df[col], format=fmt, errors="coerce")
           
      return df
-
