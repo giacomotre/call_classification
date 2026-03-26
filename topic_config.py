@@ -27,8 +27,13 @@ OUTPUT_PARQUET = Path("data/processed/cfr_savings_with_topics.parquet")
 
 @dataclass
 class EmbeddingConfig:
-    """Stage 1: Sentence-Transformers embedding."""
-    model_name: str = "all-MiniLM-L6-v2"
+    """Stage 1: Sentence-Transformers embedding.
+
+    model_name accepts either:
+      - a HuggingFace model name: "all-MiniLM-L6-v2"  (needs internet)
+      - a local folder path:      "models/all-MiniLM-L6-v2"  (offline)
+    """
+    model_name: str = "models/all-MiniLM-L6-v2"   # local path — no internet needed
     batch_size: int = 32
     show_progress: bool = True
 
@@ -46,7 +51,7 @@ class UMAPConfig:
 @dataclass
 class HDBSCANConfig:
     """Stage 3: Density-based clustering."""
-    min_cluster_size: int = 30
+    min_cluster_size: int = 150   # was 30 → forces broader clusters
     min_samples: int = 10
     metric: str = "euclidean"
     prediction_data: bool = True  # needed for .predict() later
@@ -56,9 +61,40 @@ class HDBSCANConfig:
 class VectorizerConfig:
     """Stage 4: Tokenization for c-TF-IDF topic representation."""
     ngram_range: tuple = (1, 2)   # unigrams + bigrams
-    stop_words: str = "english"
     min_df: int = 5               # ignore terms in < 5 docs
-    max_df: float = 0.95          # ignore terms in > 95% of docs
+    max_df: float = 0.5           # ignore terms in > 50% of docs (was 0.95)
+
+    # English stopwords + form template boilerplate only.
+    # Keep domain words (even common ones) — let max_df handle frequency filtering.
+    # Add more ONLY if you see obvious form labels in topic_terms.csv.
+    custom_stop_words: list = field(default_factory=lambda: [
+        # form template phrases that leak through extraction
+        "problem", "description", "problem description",
+        "complaint", "complaint handling", "handling",
+        "process", "customer", "process customer",
+        "device", "device used", "used",
+        "customer function", "function", "role",
+        "support", "support complaint",
+        "occurrence", "occurrence malfunction",
+        "diagnostic", "diagnostic expected", "expected",
+        "diagnostics", "diagnostics expected",
+        "used diagnostic", "used diagnostics",
+        "patient impact", "impact", "user impact",
+        "provided", "provided device", "provided patient",
+        "patient involved", "involved",
+        "information", "information support",
+        "product", "product failure",
+        "failure issue",
+        "malfunction", "malfunction area", "area",
+        "issue occurring", "occurring",
+        "engineer", "description engineer",
+        "technician", "technologist",
+        "tech device", "technician device", "technologist device",
+        "nurse device", "sonographer device",
+        "device usage", "behavior product",
+        "version", "confirmed", "problem confirmed",
+        "sep",  # leftover separator token
+    ])
 
 
 # ── Text preparation ──────────────────────────────────────────────────
@@ -67,8 +103,8 @@ class VectorizerConfig:
 class TextPrepConfig:
     """Controls how extracted fields are combined and cleaned."""
     separator: str = " [SEP] "
-    min_doc_length: int = 10      # chars — skip very short docs like "ok"
-    min_word_count: int = 3       # words — need enough content to embed
+    min_doc_length: int = 5      # chars — skip very short docs like "ok" (was 10)
+    min_word_count: int = 2       # words — need enough content to embed (was 2)
 
     # columns to combine for the Problem model
     problem_columns: list = field(default_factory=lambda: [

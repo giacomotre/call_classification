@@ -12,6 +12,26 @@ from config import (FIELD_REMARKS_SECTIONS, SEPARATOR, PARENT_PREFIX,
                     EXTRACTED_COLUMNS, BOILERPLATE_STRIP)
 
 
+# ── Markers that signal "form fields start here" ─────────────────────
+# Used by truncate_at_boilerplate() to cut off fallback text.
+# These appear in the intermediate columns AFTER the actual content.
+
+FALLBACK_CUTOFF_MARKERS = [
+    "Information to support the complaint handling process",
+    "Customer Function/Role",
+    "How was the device being used",
+    "When was the first occurrence",
+    "How often is issue occurring",
+    "Where in the end-user workflow",
+    "What recent events have occurred",
+    "Has the customer created a specific system event report",
+    "Expected and actual behavior of the product",
+    "User Impact:",
+    "Patient Impact:",
+    "Current Software Version",
+]
+
+
 def text_section_parser(remark_field_string):
     
     column_dictionary = {
@@ -76,6 +96,41 @@ def strip_boilerplate(text):
     return text.strip()
 
 
+def truncate_at_boilerplate(text):
+    """
+    Cut intermediate-column text at the first form-template marker.
+
+    The intermediate columns (problem_description_text, diagnostic_text)
+    often contain real content followed by form fields like:
+    
+        Problem description by engineer :
+        Chiller is not functioning              ← we want this
+        
+        How often is issue occurring? :         ← cut here
+        First occurrence
+        
+        Malfunction area :                      ← form field
+        Chiller
+        
+        Information to support the complaint... ← boilerplate block
+        Customer Function/Role: ...
+
+    This function finds the earliest cutoff marker and returns only
+    the text before it. Used as a safer fallback than the raw column.
+    """
+    if pd.isna(text) or not isinstance(text, str):
+        return None
+
+    earliest_cut = len(text)
+    for marker in FALLBACK_CUTOFF_MARKERS:
+        idx = text.lower().find(marker.lower())
+        if idx != -1 and idx < earliest_cut:
+            earliest_cut = idx
+
+    truncated = text[:earliest_cut].strip()
+    return truncated if truncated else None
+
+
 def extract_subfield(text, patterns):
     if pd.isna(text) or not isinstance(text, str) or not text.strip():
         return None
@@ -95,8 +150,8 @@ def extract_all_subfields(row, suffix=""):
         extract_subfield(row.get(f"problem_description_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
         extract_subfield(row.get(f"t2_activities_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
         extract_subfield(row.get(f"onems_internal_text{suffix}"), PROBLEM_SUBFIELD_PATTERNS) or
-        row.get(f"problem_description_text{suffix}") or
-        row.get(f"diagnostic_text{suffix}") or
+        truncate_at_boilerplate(row.get(f"problem_description_text{suffix}")) or
+        truncate_at_boilerplate(row.get(f"diagnostic_text{suffix}")) or
         None
     )
 

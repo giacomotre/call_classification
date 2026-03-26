@@ -60,9 +60,13 @@ def build_topic_model(cfg):
     )
 
     # Stage 4: tokenization for topic representation
+    # Merge sklearn's English stopwords with our custom boilerplate list
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+    all_stop_words = list(ENGLISH_STOP_WORDS | set(cfg.vectorizer.custom_stop_words))
+
     vectorizer_model = CountVectorizer(
         ngram_range=cfg.vectorizer.ngram_range,
-        stop_words=cfg.vectorizer.stop_words,
+        stop_words=all_stop_words,
         min_df=cfg.vectorizer.min_df,
         max_df=cfg.vectorizer.max_df,
     )
