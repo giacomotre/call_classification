@@ -14,9 +14,54 @@ import pandas as pd
 import ftfy
 
 
+# ── Boilerplate phrases from service form templates ───────────────────
+# These are field labels that leak through the text extraction.
+# They add noise to embeddings and must be stripped BEFORE embedding.
+# Add more as you spot them in topic_terms.csv.
+
+BOILERPLATE_PHRASES = [
+    "Problem description by engineer",
+    "Problem description",
+    "Information to support the complaint handling process",
+    "Customer Function/Role",
+    "How was the device being used",
+    "Expected and actual behavior of the product",
+    "User Impact",
+    "Patient Impact",
+    "Current Software Version",
+    "Malfunction area",
+    "Error # and/or description of error",
+    "Troubleshooting Action",
+    "Repair Action",
+    "occurrence malfunction",
+    "complaint handling",
+    "process customer",
+    "support complaint",
+    "diagnostic expected",
+    "diagnostics expected",
+    "device used",
+    "customer function",
+    "patient involved",
+    "information support",
+    "provided device",
+    "provided patient",
+    "failure issue",
+    "issue occurring",
+    "problem confirmed",
+    "description engineer",
+]
+
+
+def strip_boilerplate(text):
+    """Remove form-template phrases that add noise to embeddings."""
+    for phrase in BOILERPLATE_PHRASES:
+        text = re.sub(re.escape(phrase), "", text, flags=re.IGNORECASE)
+    return text
+
+
 # ── Stage A: clean a single text field ────────────────────────────────
 
-def clean_text(text: str) -> str | None:
+def clean_text(text):
     """
     Minimal cleaning for one extracted field.
 
@@ -24,6 +69,7 @@ def clean_text(text: str) -> str | None:
       - Fix encoding artifacts (ftfy)
       - Remove URLs and emails
       - Strip leftover [SEP] markers from extraction phase
+      - Strip form-template boilerplate phrases
       - Collapse whitespace
 
     Does NOT (by design — BERTopic best practices):
@@ -38,6 +84,7 @@ def clean_text(text: str) -> str | None:
     text = re.sub(r"https?://\S+", "", text)        # URLs
     text = re.sub(r"\S+@\S+\.\S+", "", text)        # emails
     text = text.replace("[SEP]", "")                 # old separators
+    text = strip_boilerplate(text)                   # form labels
     text = re.sub(r"\s+", " ", text).strip()
 
     return text if text else None
@@ -45,20 +92,12 @@ def clean_text(text: str) -> str | None:
 
 # ── Stage B: combine fields into one document ─────────────────────────
 
-def combine_fields(row: pd.Series, columns: list, separator: str) -> str | None:
+def combine_fields(row, columns, separator):
     """
     Join multiple extracted columns into a single document string.
 
     Skips null/empty fields so the separator only appears between
-    real content. Example:
-
-        columns = ["extracted_problem_description_remote",
-                    "extracted_malfunction_area_remote"]
-        row vals: ["Can't scan, disk full", "Storage System"]
-        → "Can't scan, disk full [SEP] Storage System"
-
-        row vals: [None, "Storage System"]
-        → "Storage System"   (no leading separator)
+    real content.
     """
     parts = []
     for col in columns:
@@ -69,39 +108,85 @@ def combine_fields(row: pd.Series, columns: list, separator: str) -> str | None:
     return separator.join(parts) if parts else None
 
 
-def prepare_documents(df: pd.DataFrame, columns: list, separator: str,
-                      min_length: int = 10,
-                      min_words: int = 3) -> pd.DataFrame:
+def get_first_valid(row, columns):
+    """Return the first non-null cleaned value from a list of columns."""
+    for col in columns:
+        cleaned = clean_text(row.get(col))
+        if cleaned:
+            return cleaned
+    return None
+
+
+def build_problem_doc(row, prefix_columns, text_columns, separator):
     """
-    Full text preparation: combine fields → filter short docs.
+    Build a problem document with malfunction area as a strong prefix.
 
-    Parameters
-    ----------
-    df          : source dataframe (the parquet)
-    columns     : which extracted_* columns to combine
-    separator   : join string, typically " [SEP] "
-    min_length  : drop docs shorter than this (chars)
-    min_words   : drop docs with fewer words than this
+    Instead of treating malfunction_area equally with problem_description,
+    we prepend it as a structured label. This gives the embedding model
+    a strong categorical signal that pulls similar problems together.
 
-    Returns
-    -------
-    DataFrame with:
-      - doc_index : original row index (to map topics back later)
-      - doc_text  : combined cleaned text, ready for embedding
+    Examples:
+        prefix="Chiller", text="LCC error overnight, cooling issue"
+        → "MALFUNCTION: Chiller. LCC error overnight, cooling issue"
+
+        prefix=None, text="LCC error overnight"
+        → "LCC error overnight"   (no prefix if malfunction area is empty)
+
+        prefix="Gradient", text=None
+        → "MALFUNCTION: Gradient"  (prefix alone is still useful)
+    """
+    prefix = get_first_valid(row, prefix_columns)
+    body = combine_fields(row, text_columns, separator)
+
+    if prefix and body:
+        return f"MALFUNCTION: {prefix}. {body}"
+    elif prefix:
+        return f"MALFUNCTION: {prefix}"
+    elif body:
+        return body
+    return None
+
+
+def prepare_problem_documents(df, cfg):
+    """
+    Prepare documents for the Problem topic model.
+
+    Uses malfunction area as a prefix for stronger clustering signal.
+
+    Returns DataFrame with doc_index and doc_text.
+    """
+    docs = df.apply(
+        lambda row: build_problem_doc(
+            row,
+            cfg.text_prep.problem_prefix_columns,
+            cfg.text_prep.problem_text_columns,
+            cfg.text_prep.separator,
+        ),
+        axis=1,
+    )
+
+    result = pd.DataFrame({"doc_index": df.index, "doc_text": docs})
+    result = result.dropna(subset=["doc_text"])
+    mask = (
+        (result["doc_text"].str.len() >= cfg.text_prep.min_doc_length) &
+        (result["doc_text"].str.split().str.len() >= cfg.text_prep.min_word_count)
+    )
+    return result[mask].reset_index(drop=True)
+
+
+def prepare_documents(df, columns, separator,
+                      min_length=10, min_words=3):
+    """
+    Prepare documents for the Resolution topic model (no prefix).
+
+    Returns DataFrame with doc_index and doc_text.
     """
     docs = df.apply(lambda row: combine_fields(row, columns, separator), axis=1)
 
-    result = pd.DataFrame({
-        "doc_index": df.index,
-        "doc_text": docs,
-    })
-
-    # drop nulls and too-short documents
+    result = pd.DataFrame({"doc_index": df.index, "doc_text": docs})
     result = result.dropna(subset=["doc_text"])
     mask = (
         (result["doc_text"].str.len() >= min_length) &
         (result["doc_text"].str.split().str.len() >= min_words)
     )
-    result = result[mask].reset_index(drop=True)
-
-    return result
+    return result[mask].reset_index(drop=True)

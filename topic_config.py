@@ -51,7 +51,7 @@ class UMAPConfig:
 @dataclass
 class HDBSCANConfig:
     """Stage 3: Density-based clustering."""
-    min_cluster_size: int = 150   # was 30 → forces broader clusters
+    min_cluster_size: int = 200   # was 30 → forces broader clusters
     min_samples: int = 10
     metric: str = "euclidean"
     prediction_data: bool = True  # needed for .predict() later
@@ -103,18 +103,23 @@ class VectorizerConfig:
 class TextPrepConfig:
     """Controls how extracted fields are combined and cleaned."""
     separator: str = " [SEP] "
-    min_doc_length: int = 5      # chars — skip very short docs like "ok" (was 10)
-    min_word_count: int = 2       # words — need enough content to embed (was 2)
+    min_doc_length: int = 10      # chars — skip very short docs like "ok"
+    min_word_count: int = 3       # words — need enough content to embed
 
-    # columns to combine for the Problem model
-    problem_columns: list = field(default_factory=lambda: [
-        "extracted_problem_description_remote",
+    # ── Problem model ──
+    # Prefix columns are prepended as "MALFUNCTION: {value}." to give
+    # the embedding model a strong categorical signal.
+    # Text columns are joined with [SEP] as the descriptive body.
+    problem_prefix_columns: list = field(default_factory=lambda: [
         "extracted_malfunction_area_remote",
-        "extracted_problem_description_field",
         "extracted_malfunction_area_field",
     ])
+    problem_text_columns: list = field(default_factory=lambda: [
+        "extracted_problem_description_remote",
+        "extracted_problem_description_field",
+    ])
 
-    # columns to combine for the Resolution model
+    # ── Resolution model (no prefix needed) ──
     resolution_columns: list = field(default_factory=lambda: [
         "extracted_repair_action_remote",
         "extracted_repair_action_field",

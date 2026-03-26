@@ -86,7 +86,7 @@ if __name__ == "__main__":
         print("  LAYER 3 — TOPIC MODELING")
         print("=" * 60)
 
-        from src.topic_modeling.text_preparation import prepare_documents
+        from src.topic_modeling.text_preparation import prepare_documents, prepare_problem_documents
         from src.topic_modeling.bertopic_wrapper import (
             build_topic_model, compute_embeddings,
             save_embeddings, load_embeddings,
@@ -99,13 +99,7 @@ if __name__ == "__main__":
 
         # ── Problem model ──
         print("\nPreparing Problem documents...")
-        problem_docs_df = prepare_documents(
-            df,
-            columns=cfg.text_prep.problem_columns,
-            separator=cfg.text_prep.separator,
-            min_length=cfg.text_prep.min_doc_length,
-            min_words=cfg.text_prep.min_word_count,
-        )
+        problem_docs_df = prepare_problem_documents(df, cfg)
         problem_docs = problem_docs_df["doc_text"].tolist()
         print(f"  {len(df)} rows → {len(problem_docs)} valid problem documents")
 
