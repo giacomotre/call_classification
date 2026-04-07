@@ -160,6 +160,7 @@ EXTRACTED_COLUMNS = [
     "extracted_malfunction_area",
     "extracted_troubleshooting",
     "extracted_repair_action",
+    "extracted_diagnostic"
 ]
 
 

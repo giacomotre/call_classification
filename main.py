@@ -12,7 +12,7 @@ OUTPUT_PATH = ROOT / "data" / "processed" / "cfr_savings_processed.parquet"
 
 if __name__ == "__main__":
 
-    raw_data = "services_cases_final.csv"
+    raw_data = "services_cases_final_v2.csv"
 
     print("Loading data...")
     df = csv_loader(raw_data)
@@ -69,6 +69,21 @@ if __name__ == "__main__":
     df.to_parquet(OUTPUT_PATH, index=False)
     print(f"\nProcessing complete. Rows processed: {len(df)} | Columns: {len(df.columns)}")
 
+    # ── Filter for topic modeling ─────────────────────────────────────
+    # Remove pure remote-only cases (no field visit AND no parts used).
+    # These are typically simple restarts that add noise to the model.
+
+    before = len(df)
+    # AFTER (keeps remote-only and US):
+
+    topic_df = df[
+    (df["field_remarks"].isna() | (df["field_remarks"].astype(str).str.strip() == "")) &
+    (df["parts_consumed_list"].isna()) &
+    (df["country"].isin(["United States", "India", "Ireland", "United Kingdom"]))
+    ].copy()
+    print(f"\nFiltered for topic modeling: {before} → {len(topic_df)} rows")
+    print(f"  Removed {before - len(topic_df)} field visit / parts consumed cases")
+
     # ── Layer 3 — Topic Modeling ──────────────────────────────────────
     #
     # Runs two BERTopic models (problem + resolution) on the extracted
@@ -99,12 +114,12 @@ if __name__ == "__main__":
 
         # ── Problem model ──
         print("\nPreparing Problem documents...")
-        problem_docs_df = prepare_problem_documents(df, cfg)
+        problem_docs_df = prepare_problem_documents(topic_df, cfg)
         problem_docs = problem_docs_df["doc_text"].tolist()
         print(f"  {len(df)} rows → {len(problem_docs)} valid problem documents")
 
         print("\nBuilding Problem topic model...")
-        problem_model, problem_emb_model = build_topic_model(cfg)
+        problem_model, problem_emb_model = build_topic_model(cfg, seed_topic_list=cfg.problem_seed_topics)
 
         emb_path = EMBEDDINGS_DIR / "problem_embeddings.npy"
         if emb_path.exists():
@@ -138,7 +153,7 @@ if __name__ == "__main__":
         # ── Resolution model ──
         print("\nPreparing Resolution documents...")
         resolution_docs_df = prepare_documents(
-            df,
+            topic_df,
             columns=cfg.text_prep.resolution_columns,
             separator=cfg.text_prep.separator,
             min_length=cfg.text_prep.min_doc_length,
@@ -148,7 +163,7 @@ if __name__ == "__main__":
         print(f"  {len(df)} rows → {len(resolution_docs)} valid resolution documents")
 
         print("\nBuilding Resolution topic model...")
-        resolution_model, resolution_emb_model = build_topic_model(cfg)
+        resolution_model, resolution_emb_model = build_topic_model(cfg, seed_topic_list=cfg.resolution_seed_topics)
 
         emb_path = EMBEDDINGS_DIR / "resolution_embeddings.npy"
         if emb_path.exists():
@@ -210,6 +225,13 @@ if __name__ == "__main__":
               f"resolution_topic_id, resolution_confidence")
 
         print(f"\n{'='*60}")
+                # ── Save case-level topic assignments ──
+        case_topics = df[["case_number", 
+                          "problem_topic_id", "problem_confidence",
+                          "resolution_topic_id", "resolution_confidence"]].copy()
+        case_topics_path = ROOT / "data" / "reports" / "case_topic_assignments.csv"
+        case_topics.to_csv(case_topics_path, index=False)
+        print(f"Case-level assignments saved to {case_topics_path}")
         print(f"  TOPIC MODELING COMPLETE")
         print(f"  Problem topics:    {len(set(problem_topics) - {-1})}")
         print(f"  Resolution topics: {len(set(resolution_topics) - {-1})}")

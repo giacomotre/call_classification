@@ -155,6 +155,11 @@ def extract_all_subfields(row, suffix=""):
         None
     )
 
+    result["extracted_diagnostic"] = (
+        truncate_at_boilerplate(row.get(f"diagnostic_text{suffix}")) or
+        None
+    )
+
     result["extracted_error"] = (
         extract_subfield(row.get(f"problem_description_text{suffix}"), ERROR_SUBFIELD_PATTERNS) or
         extract_subfield(row.get(f"internal_comments_text{suffix}"), ERROR_SUBFIELD_PATTERNS) or

@@ -28,7 +28,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 from bertopic.representation import KeyBERTInspired
 
 
-def build_topic_model(cfg):
+def build_topic_model(cfg, seed_topic_list=None):
     """
     Construct a BERTopic instance with explicit sub-models from config.
 
@@ -38,6 +38,13 @@ def build_topic_model(cfg):
       Stage 3 → hdbscan_model    (HDBSCAN)
       Stage 4 → vectorizer_model (CountVectorizer)
       Stage 5 → c-TF-IDF         (handled internally by BERTopic)
+
+    Parameters
+    ----------
+    cfg              : TopicModelConfig
+    seed_topic_list  : optional list of seed word lists for guided BERTopic.
+                       Example: [["chiller", "cooling"], ["coil", "body coil"]]
+                       Seeds nudge the model but don't force topic count.
     """
     # Stage 1: embedding model
     embedding_model = SentenceTransformer(cfg.embedding.model_name)
@@ -83,6 +90,7 @@ def build_topic_model(cfg):
         representation_model=representation_model,
         top_n_words=cfg.top_n_words,
         nr_topics=cfg.nr_topics if cfg.nr_topics != "auto" else None,
+        seed_topic_list=seed_topic_list,
         verbose=True,
     )
 
