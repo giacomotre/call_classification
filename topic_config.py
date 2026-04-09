@@ -63,7 +63,7 @@ class VectorizerConfig:
     """Stage 4: Tokenization for c-TF-IDF topic representation."""
     ngram_range: tuple = (1, 2)   # unigrams + bigrams
     min_df: int = 2               # ignore terms in < 2 docs
-    max_df: float = 0.5         # ignore terms in > 50% of docs (was 0.95)
+    max_df: float = 0.8         # ignore terms in > 50% of docs (was 0.95)
 
     # English stopwords + form template boilerplate only.
     # Keep domain words (even common ones) — let max_df handle frequency filtering.

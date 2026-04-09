@@ -4,6 +4,11 @@ from pathlib import Path
 from src.utils.loading import csv_loader, cast_column_type
 from src.utils.text import text_section_parser, count_resolutions, extract_all_subfields
 from src.utils.features import get_resolution_path, get_parts_used_flag
+from src.utils.nam_labels import load_label_table, apply_nam_labels
+from sentence_transformers import SentenceTransformer
+from src.classification.taxonomy import load_taxonomy, format_taxonomy_for_prompt
+from src.classification.retriever import build_index
+from src.classification.classifier import classify_case
 
 ROOT = Path(__file__).parent
 OUTPUT_PATH = ROOT / "data" / "processed" / "cfr_savings_processed.parquet"
@@ -64,6 +69,10 @@ if __name__ == "__main__":
     df["parts_used_flag"] = df["parts_consumed_list"].apply(get_parts_used_flag)
     print("Done.")
 
+    # NAM label Extraction     
+    label_table = load_label_table("data/raw/nam_label.xlsx")
+    df = apply_nam_labels(df, label_table)
+
     print("\nSaving to parquet...")
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUTPUT_PATH, index=False)
@@ -79,7 +88,7 @@ if __name__ == "__main__":
     topic_df = df[
     (df["field_remarks"].isna() | (df["field_remarks"].astype(str).str.strip() == "")) &
     (df["parts_consumed_list"].isna()) &
-    (df["country"].isin(["United States", "India", "Ireland", "United Kingdom"]))
+    (df["country"].isin(["United States", "Canada"])) # "India", "Ireland", "United Kingdom", 
     ].copy()
     print(f"\nFiltered for topic modeling: {before} → {len(topic_df)} rows")
     print(f"  Removed {before - len(topic_df)} field visit / parts consumed cases")
@@ -240,3 +249,27 @@ if __name__ == "__main__":
         print(f"{'='*60}")
     else:
         print("\nTopic modeling skipped (--skip-topics flag detected).")
+
+
+    # ── Layer 4 — AI Classification ──
+    
+    # load taxonomy
+    taxonomy = load_taxonomy("data/raw/nam_label.xlsx")
+    taxonomy_text = format_taxonomy_for_prompt(taxonomy)
+
+    # load embedding model (same one used in BERTopic)
+    embedding_model = SentenceTransformer("models/all-MiniLM-L6-v2")
+
+    # build retrieval index from NAM labeled cases
+    nam_labeled = df[df["nam_main_category"].notna()]
+    index = build_index(
+        nam_labeled,
+        text_col="extracted_problem_description_remote",
+        label_cols=["nam_main_category", "nam_sub_category"],
+        embedding_model=embedding_model,
+    )
+
+    # classify a single case (test)
+    test_text = "chiller temp high, cooling water out of spec"
+    result = classify_case(test_text, index, embedding_model, taxonomy_text)
+    print(result)

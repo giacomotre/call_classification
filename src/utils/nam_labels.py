@@ -121,3 +121,39 @@ def extract_nam_labels(subject, label_table):
         "nam_sub_category": sub_category,
         "nam_event_type": event_type,
     })
+
+#wrapper function
+def apply_nam_labels(df, label_table):
+    """
+    Apply NAM label extraction to a dataframe.
+    
+    Filters for NAM market, extracts labels, and prints a summary.
+    Adds three columns: nam_main_category, nam_sub_category, nam_event_type.
+    
+    Returns the dataframe with new columns added.
+    """
+    nam_mask = df["market"] == "NAM"
+    nam_count = nam_mask.sum()
+    print(f"  NAM cases found: {nam_count}")
+
+    if nam_count == 0:
+        df["nam_main_category"] = None
+        df["nam_sub_category"] = None
+        df["nam_event_type"] = None
+        return df
+
+    df.loc[nam_mask, ["nam_main_category", "nam_sub_category", "nam_event_type"]] = (
+        df.loc[nam_mask, "subject"].apply(lambda x: extract_nam_labels(x, label_table))
+    )
+
+    # Stats
+    has_code = df.loc[nam_mask, "nam_main_category"].notna().sum()
+    has_sub = df.loc[nam_mask, "nam_sub_category"].notna().sum()
+    has_event = df.loc[nam_mask, "nam_event_type"].notna().sum()
+    no_code = nam_count - has_code
+
+    print(f"  Parsed successfully: {has_code}/{nam_count} ({100*has_code/nam_count:.1f}%)")
+    print(f"  No valid code:      {no_code}/{nam_count} ({100*no_code/nam_count:.1f}%)")
+    print(f"  Main category found: {has_code} | Sub category found: {has_sub} | Event type found: {has_event}")
+
+    return df
