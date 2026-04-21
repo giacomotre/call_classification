@@ -10,46 +10,33 @@ Usage:
     result = classify_case(case_text, index, embedding_model, taxonomy_text)
 """
 import pandas as pd
-from classification.retriever import retrieve_examples, retrieve_batch
-from classification.prompt_builder import build_classification_prompt, parse_classification_response
+from src.classification.retriever import retrieve_examples, retrieve_batch
+from src.classification.prompt_builder import build_classification_prompt, parse_classification_response
 
 
 # ── LLM API call ──────────────────────────────────────────────────────
 # Replace this function when you get the API details.
 # It should take a prompt string and return the LLM's response string.
 
-def call_llm(prompt):
+def call_llm(prompt: str) -> str:
     """
-    Send a prompt to the internal LLM API and return the response.
-
-    TODO: Replace this stub with your actual API call.
-    The function should:
-      1. Send the prompt to the API
-      2. Return the response text as a string
-
-    Example for OpenAI-compatible API:
-        import requests
-        response = requests.post(
-            "https://your-internal-api.company.com/v1/chat/completions",
-            headers={"Authorization": "Bearer YOUR_KEY"},
-            json={
-                "model": "gpt-4",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-            }
-        )
-        return response.json()["choices"][0]["message"]["content"]
+    Direct OpenAI call for EU-hosted projects.
+    Requires OPENAI_API_KEY in the environment.
     """
-    # STUB: prints the prompt and returns a placeholder
-    print("\n" + "=" * 60)
-    print("  LLM API STUB — prompt that would be sent:")
-    print("=" * 60)
-    print(prompt[:500])
-    if len(prompt) > 500:
-        print(f"  ... ({len(prompt)} total characters)")
-    print("=" * 60)
+    import os
+    from openai import OpenAI
 
-    return "main_category: STUB\nsub_category: STUB"
+    client = OpenAI(
+        api_key=os.environ["OPENAI_API_KEY"],
+        base_url="https://eu.api.openai.com/v1",
+    )
+
+    resp = client.responses.create(
+        model="gpt-5.4",
+        input=prompt,
+    )
+
+    return resp.output_text
 
 
 # ── Single case classification ────────────────────────────────────────

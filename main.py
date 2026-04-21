@@ -251,25 +251,92 @@ if __name__ == "__main__":
         print("\nTopic modeling skipped (--skip-topics flag detected).")
 
 
-    # ── Layer 4 — AI Classification ──
-    
+    # ── Layer 4 — AI Classification (test mode) ──────────────────────────
+    from src.classification.classifier import classify_batch
+    from src.classification.evaluation import (
+        split_labeled_data, evaluate_retrieval, evaluate_classification,
+        confusion_report, diagnose_failures,
+    )
+    from src.classification.retriever import retrieve_batch
+
     # load taxonomy
     taxonomy = load_taxonomy("data/raw/nam_label.xlsx")
     taxonomy_text = format_taxonomy_for_prompt(taxonomy)
 
-    # load embedding model (same one used in BERTopic)
-    embedding_model = SentenceTransformer("models/all-MiniLM-L6-v2")
+    # load embedding model (same one used for retrieval evaluation)
+    embedding_model = SentenceTransformer("models/bge-base-en-v1.5")
 
-    # build retrieval index from NAM labeled cases
-    nam_labeled = df[df["nam_main_category"].notna()]
+    # filter to labeled cases with text
+    nam_labeled = df[
+        df["nam_main_category"].notna() &
+        df["extracted_problem_description_remote"].notna()
+    ].copy()
+    print(f"\nLabeled cases with text: {len(nam_labeled)}")
+
+    # split: 80% for index, 20% for testing
+    index_df, test_df = split_labeled_data(nam_labeled, test_size=0.2)
+
+    # build retrieval index from the 80%
     index = build_index(
-        nam_labeled,
+        index_df,
         text_col="extracted_problem_description_remote",
         label_cols=["nam_main_category", "nam_sub_category"],
         embedding_model=embedding_model,
     )
 
-    # classify a single case (test)
-    test_text = "chiller temp high, cooling water out of spec"
-    result = classify_case(test_text, index, embedding_model, taxonomy_text)
-    print(result)
+    # retrieve examples for test cases (for retrieval diagnostics)
+    test_texts = test_df["extracted_problem_description_remote"].tolist()
+    all_examples = retrieve_batch(test_texts, index, embedding_model, n=5)
+
+    # evaluate retrieval quality
+    retrieval_results = evaluate_retrieval(
+        test_df, all_examples,
+        "extracted_problem_description_remote", "nam_main_category",
+    )
+    print(f"\n── Retrieval Quality ──")
+    print(f"  Majority vote accuracy: {retrieval_results['majority_accuracy']:.1%}")
+    print(f"  Any correct in top-5:   {retrieval_results['any_correct_rate']:.1%}")
+
+    # classify the 20% test set via LLM
+    print(f"\n── Classifying {len(test_texts)} test cases via LLM ──")
+    predictions = classify_batch(
+        test_texts, index, embedding_model, taxonomy_text, n_examples=5,
+    )
+
+    # evaluate classification accuracy
+    class_results = evaluate_classification(
+        test_df, predictions,
+        main_label_col="nam_main_category",
+        sub_label_col="nam_sub_category",
+    )
+    print(f"\n── Classification Accuracy ──")
+    print(f"  Main category: {class_results['main_accuracy']:.1%} "
+        f"({class_results['main_correct']}/{class_results['total']})")
+    print(f"  Sub category:  {class_results['sub_accuracy']:.1%} "
+        f"({class_results['sub_correct']}/{class_results['total']})")
+    print(f"  Both correct:  {class_results['both_accuracy']:.1%} "
+        f"({class_results['both_correct']}/{class_results['total']})")
+
+    # per-category breakdown (worst first)
+    print(f"\n── Per-Category Breakdown ──")
+    confusion = confusion_report(test_df, predictions, "nam_main_category")
+    print(confusion.to_string(index=False))
+
+    # diagnose failures: retrieval vs LLM
+    diagnose_failures(
+        test_df, predictions, retrieval_results["details"],
+        "nam_main_category", n_show=10,
+    )
+
+    # save predictions alongside true labels for manual inspection
+    test_output = test_df[["extracted_problem_description_remote",
+                            "nam_main_category", "nam_sub_category"]].copy()
+    test_output["predicted_main"] = predictions["main_category"].values
+    test_output["predicted_sub"] = predictions["sub_category"].values
+    test_output["main_correct"] = test_output["nam_main_category"] == test_output["predicted_main"]
+    test_output["sub_correct"] = test_output["nam_sub_category"] == test_output["predicted_sub"]
+
+    test_output_path = ROOT / "data" / "reports" / "classification_test_results.csv"
+    test_output_path.parent.mkdir(parents=True, exist_ok=True)
+    test_output.to_csv(test_output_path, index=False)
+    print(f"\nTest results saved to {test_output_path}")
