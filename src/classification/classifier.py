@@ -18,7 +18,7 @@ from src.classification.prompt_builder import build_classification_prompt, parse
 # Replace this function when you get the API details.
 # It should take a prompt string and return the LLM's response string.
 
-def call_llm(prompt: str) -> str:
+def call_llm(prompt: str, temperature: float = 0.0) -> str:
     """
     Direct OpenAI call for EU-hosted projects.
     Requires OPENAI_API_KEY in the environment.
@@ -32,8 +32,9 @@ def call_llm(prompt: str) -> str:
     )
 
     resp = client.responses.create(
-        model="gpt-5.4",
+        model="gpt-5.4-mini",
         input=prompt,
+        temperature=temperature,
     )
 
     return resp.output_text
