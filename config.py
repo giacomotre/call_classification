@@ -175,3 +175,52 @@ PARTS_FLAG_LABELS = {
     "no_parts":   "no_parts",
     "parts_used": "parts_used"
 }
+
+
+# --- CLASSIFICATION (Layer 4) ---
+
+EMBEDDING_MODEL_PATH = "models/bge-base-en-v1.5"
+TAXONOMY_PATH = "data/raw/nam_label.xlsx"
+
+# Labels
+MAIN_LABEL_COL = "nam_main_category"
+SUB_LABEL_COL = "nam_sub_category"
+LABEL_COLS = [MAIN_LABEL_COL, SUB_LABEL_COL]
+
+# Retrieval text — compact representation for embedding + BM25 matching.
+# Format: (column_name, prefix_or_None). No prefix = raw text, with prefix = "PREFIX: text".
+# Repair action excluded: describes the fix, not the problem → causes cross-category noise.
+RETRIEVAL_FIELDS = [
+    ("extracted_problem_description_remote", None),
+    ("extracted_error_remote",               "ERROR"),
+    ("extracted_malfunction_area_remote",     "AREA"),
+    ("extracted_diagnostic_remote",           "DIAGNOSTIC"),
+]
+RETRIEVAL_SEPARATOR = " [SEP] "
+
+# LLM context — what the model sees when classifying a case.
+# Prefers raw remarks for maximum completeness; falls back to structured fields.
+LLM_RAW_CONTEXT_COL = "remote_remarks_en"
+LLM_CONTEXT_FIELDS = [
+    ("Problem",       "extracted_problem_description_remote"),
+    ("Error",         "extracted_error_remote"),
+    ("Area",          "extracted_malfunction_area_remote"),
+    ("Diagnostic",    "extracted_diagnostic_remote"),
+    ("Repair action", "extracted_repair_action_remote"),
+]
+
+# Retrieval parameters
+N_RETRIEVAL_EXAMPLES = 15
+N_CANDIDATES = 50
+RETRIEVAL_BATCH_SIZE = 32
+EXAMPLE_TRUNCATION_LENGTH = 500
+
+# LLM parameters
+LLM_TEMPERATURE = 0.0
+
+# Evaluation
+TEST_SIZE = 0.2
+EVAL_SEEDS = [42, 123, 456]
+
+# In config.py, add under CLASSIFICATION section:
+INDEX_CACHE_PATH = "data/processed/retrieval_index"

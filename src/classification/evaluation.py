@@ -282,8 +282,8 @@ def run_evaluation(labeled_df, text_col, label_cols, embedding_model,
 
     Returns dict with all results for further analysis.
     """
-    from classification.retriever import build_index, retrieve_batch
-    from classification.classifier import classify_batch
+    from src.classification.retriever import build_index, retrieve_batch
+    from src.classification.classifier import classify_batch
 
     main_label_col = label_cols[0]
     sub_label_col = label_cols[1] if len(label_cols) > 1 else None

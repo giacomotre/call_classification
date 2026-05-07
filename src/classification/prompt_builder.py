@@ -4,63 +4,65 @@ Prompt Builder for AI classification.
 Assembles structured prompts from:
   - Taxonomy (valid categories)
   - Retrieved examples (similar labeled cases)
-  - Case text (the document to classify)
+  - Case context (rich text of the case to classify)
 
 Usage:
-    from classification.prompt_builder import build_classification_prompt
+    from src.classification.prompt_builder import build_classification_prompt, parse_classification_response
 
-    prompt = build_classification_prompt(
-        case_text="chiller temp high, cooling out of spec",
-        retrieved_examples=examples,
-        taxonomy_text=formatted_taxonomy,
-    )
+    prompt = build_classification_prompt(case_context, examples, taxonomy_text)
+    result = parse_classification_response(llm_response)
 """
+import pandas as pd
+from config import EXAMPLE_TRUNCATION_LENGTH
 
 
-def build_classification_prompt(case_text, retrieved_examples, taxonomy_text):
+def build_classification_prompt(case_context, retrieved_examples, taxonomy_text,
+                                truncation_length=None):
     """
-    Build a complete prompt for problem classification.
+    Build a prompt for problem classification.
 
     Parameters
     ----------
-    case_text           : the text of the case to classify
+    case_context        : rich text of the case (from build_llm_context)
     retrieved_examples  : list of dicts from retriever.retrieve_examples()
-    taxonomy_text       : formatted taxonomy string from taxonomy.format_taxonomy_for_prompt()
+    taxonomy_text       : formatted taxonomy string
+    truncation_length   : max chars per example text (defaults to config value)
 
     Returns the full prompt string ready to send to the LLM.
     """
-    # format the retrieved examples
+    if truncation_length is None:
+        truncation_length = EXAMPLE_TRUNCATION_LENGTH
+
+    # format retrieved examples, skip any with missing labels
     examples_block = ""
     for i, ex in enumerate(retrieved_examples, 1):
-        labels = ex["labels"]
-        main = labels.get("nam_main_category", "unknown")
-        sub = labels.get("nam_sub_category", "unknown")
+        main = ex["labels"].get("nam_main_category", "unknown")
+        sub = ex["labels"].get("nam_sub_category", "unknown")
+
+        # skip examples with null labels
+        if main is None or (isinstance(main, float) and pd.isna(main)):
+            continue
+
         sim = ex["similarity"]
-        # truncate long texts for the prompt
-        text = ex["text"][:300] + "..." if len(ex["text"]) > 300 else ex["text"]
+        text = ex["text"][:truncation_length] + "..." if len(ex["text"]) > truncation_length else ex["text"]
+
         examples_block += f"  Example {i} (similarity: {sim:.2f}):\n"
-        examples_block += f"    Text: \"{text}\"\n"
+        examples_block += f'    Text: "{text}"\n'
         examples_block += f"    Classification: main_category={main}, sub_category={sub}\n\n"
 
-    prompt = f"""You are an expert MRI service engineer classifying technical service calls.
+    prompt = f"""You are an expert MRI service engineer. Your task is to classify the problem of a technical service call into a fixed number of categories.
 
-TASK:
-Classify the service call below into a main_category and sub_category.
-You MUST choose from the categories listed below. Do not invent new categories.
-
-TAXONOMY OF VALID CATEGORIES:
+VALID CATEGORIES:
 {taxonomy_text}
 
-SIMILAR CASES AND THEIR CLASSIFICATIONS:
+SIMILAR CASES (already classified by engineers):
 {examples_block}
 CASE TO CLASSIFY:
-\"{case_text}\"
+"{case_context}"
 
-INSTRUCTIONS:
-- Choose the single best main_category and sub_category from the taxonomy above.
-- If the case matches multiple categories, choose the PRIMARY root cause.
-- If unsure, choose the category that best matches the similar cases above.
-- Use "other" as sub_category only when no specific sub_category fits.
+Choose exactly ONE main_category and sub_category from the valid categories above.
+Do not invent new categories. If unsure, choose the category that best matches the similar cases above.
+If the case matches multiple categories, choose the PRIMARY root cause.
 
 RESPOND IN EXACTLY THIS FORMAT (nothing else):
 main_category: <value>
@@ -77,7 +79,7 @@ def parse_classification_response(response_text):
         main_category: software
         sub_category: process_crash
 
-    Returns dict with main_category and sub_category, or None values if parsing fails.
+    Returns dict with main_category and sub_category (None if parsing fails).
     """
     result = {"main_category": None, "sub_category": None}
 

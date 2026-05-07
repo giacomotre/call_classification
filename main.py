@@ -78,90 +78,160 @@ if __name__ == "__main__":
     df.to_parquet(OUTPUT_PATH, index=False)
     print(f"\nProcessing complete. Rows processed: {len(df)} | Columns: {len(df.columns)}")
 
-    # ── Layer 4 — AI Classification (test mode) ──────────────────────────
+        # ── Layer 3 — AI Classification (evaluation mode) ──────────────────
+    #
+    # Evaluates classification accuracy on NAM-labeled cases:
+    #   1. Build enriched text columns (retrieval text + LLM context)
+    #   2. Split labeled cases into index (80%) and test (20%)
+    #   3. Retrieve similar cases using enriched retrieval text
+    #   4. Classify test cases using LLM with rich context
+    #   5. Report accuracy and save results
+    #
+    # Config: all parameters in config.py under CLASSIFICATION section.
+    # ──────────────────────────────────────────────────────────────────────
+
+    from sentence_transformers import SentenceTransformer
+    from src.classification.taxonomy import load_taxonomy, format_taxonomy_for_prompt
+    from src.classification.text_builder import build_retrieval_text, build_llm_context
+    from src.classification.retriever import build_index, retrieve_batch
     from src.classification.classifier import classify_batch
     from src.classification.evaluation import (
         split_labeled_data, evaluate_retrieval, evaluate_classification,
         confusion_report, diagnose_failures,
     )
-    from src.classification.retriever import retrieve_batch
+    from config import (
+        EMBEDDING_MODEL_PATH, TAXONOMY_PATH, LABEL_COLS,
+        MAIN_LABEL_COL, SUB_LABEL_COL,
+        N_RETRIEVAL_EXAMPLES, RETRIEVAL_BATCH_SIZE, TEST_SIZE,
+    )
 
-    # load taxonomy
-    taxonomy = load_taxonomy("data/raw/nam_label.xlsx")
+    print("\n" + "=" * 60)
+    print("  LAYER 3 — AI CLASSIFICATION (evaluation)")
+    print("=" * 60)
+
+    # ── 1. Build enriched text columns ──
+    print("\nBuilding enriched text columns...")
+    df["retrieval_text"] = df.apply(build_retrieval_text, axis=1)
+    df["llm_context"] = df.apply(build_llm_context, axis=1)
+
+    filled_ret = df["retrieval_text"].notna().sum()
+    filled_llm = df["llm_context"].notna().sum()
+    print(f"  retrieval_text: {filled_ret}/{len(df)} rows")
+    print(f"  llm_context:    {filled_llm}/{len(df)} rows")
+
+    # ── 2. Load taxonomy + embedding model ──
+    taxonomy = load_taxonomy(TAXONOMY_PATH)
     taxonomy_text = format_taxonomy_for_prompt(taxonomy)
+    embedding_model = SentenceTransformer(EMBEDDING_MODEL_PATH)
 
-    # load embedding model (same one used for retrieval evaluation)
-    embedding_model = SentenceTransformer("models/bge-base-en-v1.5")
-
-    # filter to labeled cases with text
+    # ── 3. Filter to labeled cases with text ──
     nam_labeled = df[
-        df["nam_main_category"].notna() &
-        df["extracted_problem_description_remote"].notna()
+        df[MAIN_LABEL_COL].notna() &
+        df["retrieval_text"].notna() &
+        df["llm_context"].notna()
     ].copy()
     print(f"\nLabeled cases with text: {len(nam_labeled)}")
 
-    # split: 80% for index, 20% for testing
-    index_df, test_df = split_labeled_data(nam_labeled, test_size=0.2)
+    # ── 4. Split: 80% for index, 20% for testing ──
+    index_df, test_df = split_labeled_data(nam_labeled, test_size=TEST_SIZE)
 
-    # build retrieval index from the 80%
-    index = build_index(
-        index_df,
-        text_col="extracted_problem_description_remote",
-        label_cols=["nam_main_category", "nam_sub_category"],
-        embedding_model=embedding_model,
+    # ── 5. Build or load retrieval index ──
+
+    # Embedding ~1,000 labeled cases takes a few minutes.
+    # After the first run, the index is saved to disk:
+    #   data/processed/retrieval_index/embeddings.npy    (dense vectors)
+    #   data/processed/retrieval_index/labeled_cases.csv  (texts + labels)
+    #
+    # Subsequent runs load these files instantly, skipping the embedding step.
+    #
+    # The cache is ONLY valid if the underlying data hasn't changed.
+    # Re-build when: labeled cases change, retrieval fields change (config),
+    # or the embedding model changes.
+    #
+    # To force a fresh build, either:
+    #   - delete the files (or the folder) at data/processed/retrieval_index/
+    #   - run:  python main.py --rebuild-index
+
+    from src.classification.retriever import save_index, load_index
+    from config import INDEX_CACHE_PATH
+
+    index_cache = ROOT / INDEX_CACHE_PATH
+    index_ready = (index_cache / "embeddings.npy").exists() and (index_cache / "labeled_cases.csv").exists()
+    if index_ready and "--rebuild-index" not in sys.argv:
+        print("\nLoading cached retrieval index...")
+        index = load_index(index_cache)
+    else:
+        print("\nBuilding retrieval index...")
+        index = build_index(
+            index_df,
+            text_col="retrieval_text",
+            label_cols=LABEL_COLS,
+            embedding_model=embedding_model,
+            batch_size=RETRIEVAL_BATCH_SIZE,
+        )
+        save_index(index, index_cache)
+
+    # ── 6. Retrieve examples for test cases ──
+    print(f"\nRetrieving {N_RETRIEVAL_EXAMPLES} examples per test case...")
+    test_retrieval_texts = test_df["retrieval_text"].tolist()
+    all_examples = retrieve_batch(
+        test_retrieval_texts, index, embedding_model,
+        n=N_RETRIEVAL_EXAMPLES, batch_size=RETRIEVAL_BATCH_SIZE,
     )
 
-    # retrieve examples for test cases (for retrieval diagnostics)
-    test_texts = test_df["extracted_problem_description_remote"].tolist()
-    all_examples = retrieve_batch(test_texts, index, embedding_model, n=5)
-
-    # evaluate retrieval quality
+    # ── 7. Evaluate retrieval quality ──
     retrieval_results = evaluate_retrieval(
-        test_df, all_examples,
-        "extracted_problem_description_remote", "nam_main_category",
+        test_df, all_examples, "retrieval_text", MAIN_LABEL_COL,
     )
     print(f"\n── Retrieval Quality ──")
     print(f"  Majority vote accuracy: {retrieval_results['majority_accuracy']:.1%}")
-    print(f"  Any correct in top-5:   {retrieval_results['any_correct_rate']:.1%}")
+    print(f"  Any correct in top-{N_RETRIEVAL_EXAMPLES}:   {retrieval_results['any_correct_rate']:.1%}")
 
-    # classify the 20% test set via LLM
-    print(f"\n── Classifying {len(test_texts)} test cases via LLM ──")
-    predictions = classify_batch(
-        test_texts, index, embedding_model, taxonomy_text, n_examples=5,
-    )
+    # ── 8. Classify test cases via LLM ──
+    test_contexts = test_df["llm_context"].tolist()
+    print(f"\n── Classifying {len(test_contexts)} test cases via LLM ──")
+    predictions = classify_batch(test_contexts, all_examples, taxonomy_text)
 
-    # evaluate classification accuracy
+    # ── 9. Evaluate classification accuracy ──
     class_results = evaluate_classification(
-        test_df, predictions,
-        main_label_col="nam_main_category",
-        sub_label_col="nam_sub_category",
+        test_df, predictions, MAIN_LABEL_COL, SUB_LABEL_COL,
     )
     print(f"\n── Classification Accuracy ──")
     print(f"  Main category: {class_results['main_accuracy']:.1%} "
-        f"({class_results['main_correct']}/{class_results['total']})")
+          f"({class_results['main_correct']}/{class_results['total']})")
     print(f"  Sub category:  {class_results['sub_accuracy']:.1%} "
-        f"({class_results['sub_correct']}/{class_results['total']})")
+          f"({class_results['sub_correct']}/{class_results['total']})")
     print(f"  Both correct:  {class_results['both_accuracy']:.1%} "
-        f"({class_results['both_correct']}/{class_results['total']})")
+          f"({class_results['both_correct']}/{class_results['total']})")
 
-    # per-category breakdown (worst first)
+    # ── 10. Per-category breakdown (worst first) ──
     print(f"\n── Per-Category Breakdown ──")
-    confusion = confusion_report(test_df, predictions, "nam_main_category")
+    confusion = confusion_report(test_df, predictions, MAIN_LABEL_COL)
     print(confusion.to_string(index=False))
 
-    # diagnose failures: retrieval vs LLM
+    # ── 11. Diagnose failures ──
     diagnose_failures(
         test_df, predictions, retrieval_results["details"],
-        "nam_main_category", n_show=10,
+        MAIN_LABEL_COL, n_show=10,
     )
 
-    # save predictions alongside true labels for manual inspection
-    test_output = test_df[["extracted_problem_description_remote",
-                            "nam_main_category", "nam_sub_category"]].copy()
+    # ── 12. Save results ──
+    # Include retrieval majority label for failure analysis in evaluation notebook
+    from collections import Counter
+
+    retrieval_majority_labels = []
+    for examples in all_examples:
+        labels = [ex["labels"][MAIN_LABEL_COL] for ex in examples]
+        majority = Counter(labels).most_common(1)[0][0]
+        retrieval_majority_labels.append(majority)
+
+    test_output = test_df[["retrieval_text", "llm_context",
+                           MAIN_LABEL_COL, SUB_LABEL_COL]].copy()
     test_output["predicted_main"] = predictions["main_category"].values
     test_output["predicted_sub"] = predictions["sub_category"].values
-    test_output["main_correct"] = test_output["nam_main_category"] == test_output["predicted_main"]
-    test_output["sub_correct"] = test_output["nam_sub_category"] == test_output["predicted_sub"]
+    test_output["retrieval_majority_label"] = retrieval_majority_labels
+    test_output["main_correct"] = test_output[MAIN_LABEL_COL] == test_output["predicted_main"]
+    test_output["sub_correct"] = test_output[SUB_LABEL_COL] == test_output["predicted_sub"]
 
     test_output_path = ROOT / "data" / "reports" / "classification_test_results.csv"
     test_output_path.parent.mkdir(parents=True, exist_ok=True)

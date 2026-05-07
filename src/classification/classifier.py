@@ -1,30 +1,32 @@
 """
 AI Classifier for service calls.
 
-Sends prompts to the internal LLM API and parses responses.
-Currently uses a stub — replace call_llm() when API details arrive.
+Sends prompts to the LLM API and parses responses.
+Retrieval is handled separately — this module only builds prompts and calls the LLM.
 
 Usage:
-    from classification.classifier import classify_case, classify_batch
+    from src.classification.classifier import classify_batch
 
-    result = classify_case(case_text, index, embedding_model, taxonomy_text)
+    predictions = classify_batch(case_contexts, all_examples, taxonomy_text)
 """
 import pandas as pd
-from src.classification.retriever import retrieve_examples, retrieve_batch
+from config import LLM_TEMPERATURE
 from src.classification.prompt_builder import build_classification_prompt, parse_classification_response
 
 
-# ── LLM API call ──────────────────────────────────────────────────────
-# Replace this function when you get the API details.
-# It should take a prompt string and return the LLM's response string.
+# ── LLM API call ─────────────────────────────────────────────────────
 
-def call_llm(prompt: str, temperature: float = 0.0) -> str:
+def call_llm(prompt: str, temperature: float = None) -> str:
     """
-    Direct OpenAI call for EU-hosted projects.
-    Requires OPENAI_API_KEY in the environment.
+    Call the LLM API.
+
+    Uses EU-hosted OpenAI endpoint. Requires OPENAI_API_KEY in environment.
     """
     import os
     from openai import OpenAI
+
+    if temperature is None:
+        temperature = LLM_TEMPERATURE
 
     client = OpenAI(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -40,79 +42,55 @@ def call_llm(prompt: str, temperature: float = 0.0) -> str:
     return resp.output_text
 
 
-# ── Single case classification ────────────────────────────────────────
+# ── Single case classification ───────────────────────────────────────
 
-def classify_case(case_text, index, embedding_model, taxonomy_text, n_examples=5):
+def classify_case(case_context, retrieved_examples, taxonomy_text):
     """
     Classify a single service call.
 
-    Steps:
-      1. Retrieve n similar labeled cases (local)
-      2. Build prompt with taxonomy + examples + case (local)
-      3. Call LLM API (remote)
-      4. Parse response
+    Parameters
+    ----------
+    case_context        : LLM context text (from build_llm_context)
+    retrieved_examples  : list of dicts from retrieve_examples()
+    taxonomy_text       : formatted taxonomy string
 
-    Returns dict with main_category, sub_category, and retrieved examples.
+    Returns dict with main_category and sub_category.
     """
-    # step 1: retrieve similar labeled cases
-    examples = retrieve_examples(case_text, index, embedding_model, n=n_examples)
-
-    # step 2: build prompt
-    prompt = build_classification_prompt(case_text, examples, taxonomy_text)
-
-    # step 3: call LLM
+    prompt = build_classification_prompt(case_context, retrieved_examples, taxonomy_text)
     response = call_llm(prompt)
-
-    # step 4: parse
-    result = parse_classification_response(response)
-    result["retrieved_examples"] = examples
-
-    return result
+    return parse_classification_response(response)
 
 
-# ── Batch classification ──────────────────────────────────────────────
+# ── Batch classification ─────────────────────────────────────────────
 
-def classify_batch(case_texts, index, embedding_model, taxonomy_text,
-                   n_examples=5, batch_size=32, progress=True):
+def classify_batch(case_contexts, all_examples, taxonomy_text, progress=True):
     """
     Classify multiple service calls.
 
-    Embeds all cases in one batch (fast), then calls LLM per case.
+    Retrieval is done beforehand — this function only builds prompts
+    and calls the LLM for each case.
 
     Parameters
     ----------
-    case_texts      : list of text strings to classify
-    index           : retrieval index from build_index()
-    embedding_model : SentenceTransformer model
+    case_contexts   : list of LLM context strings (from build_llm_context)
+    all_examples    : list of lists from retrieve_batch()
     taxonomy_text   : formatted taxonomy string
-    n_examples      : number of similar cases to retrieve per case
-    batch_size      : embedding batch size
-    progress        : print progress
+    progress        : print progress updates
 
-    Returns DataFrame with columns: text, main_category, sub_category
+    Returns DataFrame with columns: main_category, sub_category
     """
-    total = len(case_texts)
+    total = len(case_contexts)
     print(f"  Classifying {total} cases...")
 
-    # step 1: batch retrieve (embeds all queries at once)
-    print(f"  Retrieving {n_examples} examples per case...")
-    all_examples = retrieve_batch(
-        case_texts, index, embedding_model,
-        n=n_examples, batch_size=batch_size,
-    )
-
-    # step 2-4: build prompts and call LLM per case
     results = []
-    for i, (text, examples) in enumerate(zip(case_texts, all_examples)):
+    for i, (context, examples) in enumerate(zip(case_contexts, all_examples)):
         if progress and (i + 1) % 50 == 0:
             print(f"  Classified {i + 1}/{total}...")
 
-        prompt = build_classification_prompt(text, examples, taxonomy_text)
+        prompt = build_classification_prompt(context, examples, taxonomy_text)
         response = call_llm(prompt)
         result = parse_classification_response(response)
-        result["text"] = text
         results.append(result)
 
     print(f"  Classification complete: {total} cases processed")
-
     return pd.DataFrame(results)
