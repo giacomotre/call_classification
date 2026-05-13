@@ -44,9 +44,23 @@ def build_classification_prompt(case_context, retrieved_examples, taxonomy_text,
             continue
 
         sim = ex["similarity"]
+        
+        # base_text = ex.get("llm_context", ex["text"])
+        #text = base_text[:truncation_length] + "..." if len(base_text) > truncation_length else base_text
         base_text = ex.get("llm_context", ex["text"])
-        text = base_text[:truncation_length] + "..." if len(base_text) > truncation_length else base_text
 
+        parts = base_text.split("\n\n")
+
+        # keep primary info (signals + structured)
+        primary_text = "\n\n".join(parts[:2])
+
+        # optionally append repair as secondary info
+        repair_text = ""
+        if "Repair Action" in base_text:
+            repair_text = "\n(Repair info): " + base_text.split("Repair Action")[-1][:150]
+
+        text = primary_text + repair_text
+        #uncomment the two line before and the delete up to here
         examples_block += f"  Example {i} (similarity: {sim:.2f}):\n"
         examples_block += f'    Text: "{text}"\n'
         examples_block += f"    Classification: main_category={main}, sub_category={sub}\n\n"

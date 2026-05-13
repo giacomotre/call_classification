@@ -202,16 +202,16 @@ RETRIEVAL_SEPARATOR = " [SEP] "
 # Prefers raw remarks for maximum completeness; falls back to structured fields.
 LLM_RAW_CONTEXT_COL = "remote_remarks_en"
 LLM_CONTEXT_FIELDS = [
-    ("Problem",       "extracted_problem_description_remote"),
-    ("Error",         "extracted_error_remote"),
-    ("Area",          "extracted_malfunction_area_remote"),
     ("Diagnostic",    "extracted_diagnostic_remote"),
+    ("Area",          "extracted_malfunction_area_remote"),
+    ("Error",         "extracted_error_remote"),
+    ("Problem",       "extracted_problem_description_remote"),
     ("Repair action", "extracted_repair_action_remote"),
 ]
 
 # Retrieval parameters
 N_RETRIEVAL_EXAMPLES = 15
-N_CANDIDATES = 50
+N_CANDIDATES = 100
 RETRIEVAL_BATCH_SIZE = 32
 EXAMPLE_TRUNCATION_LENGTH = 500
 

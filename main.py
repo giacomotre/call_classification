@@ -145,6 +145,7 @@ if __name__ == "__main__":
     review_cols = [
         "case_number",
         "info_score",
+        "market",
         "remote_remarks_en",
         "extracted_problem_description_remote",
         "extracted_error_remote",
