@@ -95,6 +95,7 @@ if __name__ == "__main__":
     from src.classification.text_builder import build_retrieval_text, build_llm_context
     from src.classification.retriever import build_index, retrieve_batch
     from src.classification.classifier import classify_batch
+    from src.utils.case_handler import compute_info_score
     from src.classification.evaluation import (
         split_labeled_data, evaluate_retrieval, evaluate_classification,
         confusion_report, diagnose_failures,
@@ -124,8 +125,43 @@ if __name__ == "__main__":
     taxonomy_text = format_taxonomy_for_prompt(taxonomy)
     embedding_model = SentenceTransformer(EMBEDDING_MODEL_PATH)
 
+    # ── 2.5 Filter low-information cases ──
+    print("\nFiltering low-information cases...")
+
+    # compute information score
+    df["info_score"] = df.apply(compute_info_score, axis=1)
+
+    # create mask
+    info_mask = df["info_score"] >= 40   # <-- threshold (tune later if needed)
+
+    # split dataset
+    df_valid = df[info_mask].copy()
+    df_invalid = df[~info_mask].copy()
+
+    print(f" Valid cases: {len(df_valid)}")
+    print(f" Low-information cases: {len(df_invalid)}")
+
+    # store invalid cases for review
+    review_cols = [
+        "case_number",
+        "info_score",
+        "remote_remarks_en",
+        "extracted_problem_description_remote",
+        "extracted_error_remote",
+        "extracted_malfunction_area_remote",
+        "extracted_diagnostic_remote",
+    ]
+
+    review_path = ROOT / "data" / "reports" / "low_information_cases.csv"
+    review_path.parent.mkdir(parents=True, exist_ok=True)
+
+    df_invalid[review_cols].to_csv(review_path, index=False)
+    print(f"Rejected cases: {len(df_invalid)} ({len(df_invalid)/len(df):.1%})")
+    print(f" Low-information cases saved to: {review_path}")
+
+
     # ── 3. Filter to labeled cases with text ──
-    nam_labeled = df[
+    nam_labeled = df_valid[
         df[MAIN_LABEL_COL].notna() &
         df["retrieval_text"].notna() &
         df["llm_context"].notna()
@@ -168,6 +204,7 @@ if __name__ == "__main__":
             label_cols=LABEL_COLS,
             embedding_model=embedding_model,
             batch_size=RETRIEVAL_BATCH_SIZE,
+            extra_cols=["llm_context"],
         )
         save_index(index, index_cache)
 

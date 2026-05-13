@@ -15,7 +15,7 @@ import pandas as pd
 from rank_bm25 import BM25Okapi
 
 
-def build_index(labeled_df, text_col, label_cols, embedding_model, batch_size=32):
+def build_index(labeled_df, text_col, label_cols, embedding_model, batch_size=32, extra_cols=None):
     """
     Build a hybrid retrieval index from labeled cases.
 
@@ -64,6 +64,11 @@ def build_index(labeled_df, text_col, label_cols, embedding_model, batch_size=32
     for _, row in subset.iterrows():
         labels.append({col: row[col] for col in label_cols})
 
+    extras = {}
+    if extra_cols:
+        for col in extra_cols:
+            extras[col] = subset[col].tolist()
+
     print(f"  Index built: {len(texts)} cases, "
           f"{embeddings.shape[1]} dense dims + BM25 sparse")
 
@@ -72,6 +77,7 @@ def build_index(labeled_df, text_col, label_cols, embedding_model, batch_size=32
         "bm25": bm25,
         "texts": texts,
         "labels": labels,
+        "extras": extras if extra_cols else None,
     }
 
 
@@ -229,6 +235,7 @@ def retrieve_batch(query_texts, index, embedding_model, n=5,
                 "text": index["texts"][idx],
                 "labels": index["labels"][idx],
                 "similarity": float(sim_matrix[i][idx]),
+                **({col: index["extras"][col][idx] for col in index["extras"]} if index.get("extras") else {})
             })
         all_results.append(results)
 

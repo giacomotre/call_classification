@@ -44,7 +44,8 @@ def build_classification_prompt(case_context, retrieved_examples, taxonomy_text,
             continue
 
         sim = ex["similarity"]
-        text = ex["text"][:truncation_length] + "..." if len(ex["text"]) > truncation_length else ex["text"]
+        base_text = ex.get("llm_context", ex["text"])
+        text = base_text[:truncation_length] + "..." if len(base_text) > truncation_length else base_text
 
         examples_block += f"  Example {i} (similarity: {sim:.2f}):\n"
         examples_block += f'    Text: "{text}"\n'
