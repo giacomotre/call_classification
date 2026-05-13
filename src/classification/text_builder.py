@@ -37,7 +37,7 @@ def build_retrieval_text(row):
     return RETRIEVAL_SEPARATOR.join(parts) if parts else None
 
 
-def build_llm_context(row):
+#def build_llm_context(row):
     """
     Build rich context text for the LLM classification prompt.
 
@@ -59,4 +59,25 @@ def build_llm_context(row):
         if pd.notna(val) and str(val).strip():
             parts.append(f"{label}: {str(val).strip()}")
 
+    return "\n".join(parts) if parts else None
+
+def build_llm_context(row):
+    """ 
+    Build rich context text for the LLM classification prompt.
+    Add also structured input to explicit signal presentation 
+    to improve fine-grained classification decisions.
+    """
+    raw = str(row.get(LLM_RAW_CONTEXT_COL, "") or "").strip()
+
+    if len(raw) > 20:
+        structured = "\n".join(
+            f"{name}: {str(row.get(col,'') or '')[:300]}"
+            for name, col in LLM_CONTEXT_FIELDS if row.get(col)
+        )
+        return f"{structured}\n\n{raw}" if structured else raw
+
+    parts = [
+        f"{name}: {str(row.get(col,'') or '')}"
+        for name, col in LLM_CONTEXT_FIELDS if row.get(col)
+    ]
     return "\n".join(parts) if parts else None
